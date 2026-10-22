@@ -1,0 +1,19 @@
+# PPO Training Configuration for Deadly Corridor Scenario
+env: deadly_corridor
+algorithm: PPO
+total_timesteps: 10000000
+learning_rate: 3.0e-4
+n_steps: 2048
+batch_size: 64
+n_epochs: 10
+gamma: 0.99
+gae_lambda: 0.95
+clip_range: 0.2
+ent_coef: 0.01
+vf_coef: 0.5
+max_grad_norm: 0.5
+frame_stack: 4
+screen_width: 84
+screen_height: 84
+n_envs: 4
+tensorboard_log: ./logs/

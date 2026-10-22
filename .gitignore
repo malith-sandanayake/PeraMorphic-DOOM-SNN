@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual env
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+
+# Logs
+logs/
+*.log
+
+# Models (can be large)
+models/ann_*/
+models/snn_*/
+models/best_*
+
+# Evaluation results
+eval/results_*.json
+eval/videos/
+eval/firing_rates.png
+eval/training_progress.png
+
+# TensorBoard
+runs/
+
+# OS
+.DS_Store
+Thumbs.db
