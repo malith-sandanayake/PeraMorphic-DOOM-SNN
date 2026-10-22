@@ -37,6 +37,9 @@ eval/training_progress.png
 # TensorBoard
 runs/
 
+# Claude Code internals
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db
