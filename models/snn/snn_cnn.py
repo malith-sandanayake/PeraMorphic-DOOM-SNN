@@ -113,20 +113,21 @@ class SpikingCNN(nn.Module):
             frame = x[:, t]
 
             # === Convolutional layers with LIF ===
-            # Conv1: (B, C, H, W) → (B, 32, 19, 19)
-            conv1_out = F.relu(self.conv1(frame))
+            # Each layer: Conv2d output -> LIF activation (replaces ReLU)
+            # Conv1: (B, C, H, W) -> (B, 32, 19, 19)
+            conv1_out = self.conv1(frame)
             conv1_out, (spike1, hidden_state["lif1"]) = self.lif1(
                 conv1_out, **hidden_state.get("lif1", {})
             )
 
-            # Conv2: (B, 32, 19, 19) → (B, 64, 9, 9)
-            conv2_out = F.relu(self.conv2(conv1_out))
+            # Conv2: (B, 32, 19, 19) -> (B, 64, 9, 9)
+            conv2_out = self.conv2(conv1_out)
             conv2_out, (spike2, hidden_state["lif2"]) = self.lif2(
                 conv2_out, **hidden_state.get("lif2", {})
             )
 
-            # Conv3: (B, 64, 9, 9) → (B, 64, 7, 7)
-            conv3_out = F.relu(self.conv3(conv2_out))
+            # Conv3: (B, 64, 9, 9) -> (B, 64, 7, 7)
+            conv3_out = self.conv3(conv2_out)
             conv3_out, (spike3, hidden_state["lif3"]) = self.lif3(
                 conv3_out, **hidden_state.get("lif3", {})
             )
@@ -135,8 +136,8 @@ class SpikingCNN(nn.Module):
             flat = conv3_out.flatten(1)  # (B, 64*7*7) = (B, 3136)
 
             # === FC layers with LIF ===
-            # FC1: (B, 3136) → (B, 512)
-            fc1_out = F.relu(self.fc1(flat))
+            # FC1: (B, 3136) -> (B, 512)
+            fc1_out = self.fc1(flat)
             fc1_out, (spike4, hidden_state["lif4"]) = self.lif4(
                 fc1_out, **hidden_state.get("lif4", {})
             )
@@ -174,8 +175,8 @@ class SpikingCNN(nn.Module):
         if action is None:
             return policy_rate, values, hidden
 
-        # Convert rates to probabilities via softmax
-        log_probs = torch.log(policy_rate + 1e-10)
+        # Convert policy rates (treated as logits) to probabilities
+        log_probs = F.log_softmax(policy_rate, dim=-1)
         probs = F.softmax(policy_rate, dim=-1)
         log_prob = log_probs.gather(1, action.unsqueeze(-1)).squeeze(-1)
         entropy = -(log_probs * probs).sum(dim=-1)

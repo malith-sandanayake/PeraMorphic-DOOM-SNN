@@ -16,6 +16,10 @@ import os
 import argparse
 import yaml
 from pathlib import Path
+from typing import Tuple
+
+import torch
+import torch.nn.functional as F
 
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback, EveryNTimesteps
@@ -82,10 +86,11 @@ class EvaluationCallback(BaseCallback):
                 f"Mean eval reward: {mean_reward:.2f} ± {std_reward:.2f}"
             )
 
-            # Save best model
+            # Save best model — read scenario from env metadata
+            scenario = self.model.env.metadata.get("scenario", "simple")
             if mean_reward > getattr(self, "best_mean_reward", -1e9):
                 self.best_mean_reward = mean_reward
-                save_path = f"models/best_{self.locals.get('scenario', 'simple')}"
+                save_path = f"models/best_{scenario}"
                 self.model.save(save_path)
                 if self.verbose:
                     print(f"  New best model saved (reward: {mean_reward:.2f})")
@@ -151,7 +156,7 @@ def make_env(scenario: str, env_idx: int, screen_size: tuple, use_depth: bool):
     return _init
 
 
-def train(args: argparse.Namespace) -> PPO:
+def train(args: argparse.Namespace, config: dict = None) -> PPO:
     """Train PPO agent on DOOM.
 
     Args:
@@ -186,21 +191,37 @@ def train(args: argparse.Namespace) -> PPO:
 
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
+            # Replace SB3's feature extractor with DoomNet
+            self.features_extractor = DoomNet(
+                input_channels=kwargs.get("features_extractor_channels", 8),
+                n_actions=self.n_actions,
+                hidden_dim=512,
+            )
+
+        def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            """Forward pass through DoomNet, returning policy and value outputs."""
+            policy_logits, values = self.features_extractor(x)
+            return policy_logits, values
 
     # Create PPO model
+    lr = (
+        args.learning_rate
+        if hasattr(args, "learning_rate") and args.learning_rate
+        else 3e-4
+    )
     model = PPO(
         DoomPolicy,
         env,
-        learning_rate=args.learning_rate if hasattr(args, "learning_rate") and args.learning_rate else 3e-4,
-        n_steps=scenario_info.get("n_steps", 2048),
-        batch_size=scenario_info.get("batch_size", 64),
-        n_epochs=scenario_info.get("n_epochs", 10),
-        gamma=scenario_info.get("gamma", 0.99),
-        gae_lambda=scenario_info.get("gae_lambda", 0.95),
-        clip_range=scenario_info.get("clip_range", 0.2),
-        ent_coef=scenario_info.get("ent_coef", 0.01),
-        vf_coef=scenario_info.get("vf_coef", 0.5),
-        max_grad_norm=scenario_info.get("max_grad_norm", 0.5),
+        learning_rate=lr,
+        n_steps=config.get("n_steps", scenario_info.get("n_steps", 2048)),
+        batch_size=config.get("batch_size", scenario_info.get("batch_size", 64)),
+        n_epochs=config.get("n_epochs", scenario_info.get("n_epochs", 10)),
+        gamma=config.get("gamma", 0.99),
+        gae_lambda=config.get("gae_lambda", 0.95),
+        clip_range=config.get("clip_range", 0.2),
+        ent_coef=config.get("ent_coef", 0.01),
+        vf_coef=config.get("vf_coef", 0.5),
+        max_grad_norm=config.get("max_grad_norm", 0.5),
         verbose=1,
     )
 
@@ -260,8 +281,10 @@ def main(args):
             config["total_timesteps"] = args.total_timesteps
         if args.n_envs:
             config["n_envs"] = args.n_envs
+    else:
+        config = {}
 
-    train(args)
+    train(args, config=config)
 
 
 if __name__ == "__main__":

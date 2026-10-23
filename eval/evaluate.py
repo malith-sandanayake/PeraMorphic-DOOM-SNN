@@ -147,12 +147,15 @@ def evaluate_snn_agent(
             # Preprocess frame
             processed = processor.process(obs)
 
-            # Convert to tensor: (T, C, H, W)
+            # Convert to tensor (C, H, W) then reshape to (1, T, C, H, W)
+            # Use T from the SNN policy, not hardcoded T=1
             frame_tensor = torch.from_numpy(
                 processed.transpose(2, 0, 1)
-            ).unsqueeze(0).float()  # (1, C, H*4, W)
-            # Reshape to (1, T=1, C, H, W) — single step simulation
+            ).unsqueeze(0).float()  # (1, C, H, W)
+            T_actual = getattr(snn_policy, "T", T)
+            # Expand to (1, T, C, H, W) — repeat same frame across T steps
             frame_tensor = frame_tensor.view(1, 1, *frame_tensor.shape[1:])
+            frame_tensor = frame_tensor.expand(1, T_actual, *frame_tensor.shape[2:])
 
             # Forward pass through SNN
             with torch.no_grad():

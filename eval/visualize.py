@@ -13,6 +13,13 @@ from pathlib import Path
 from typing import List, Optional
 from PIL import Image
 
+try:
+    import cv2
+
+    _HAS_OPENCV = True
+except ImportError:
+    _HAS_OPENCV = False
+
 
 class FrameRecorder:
     """Records DOOM gameplay frames to video.
@@ -82,21 +89,52 @@ class FrameRecorder:
     def _save_video(self) -> None:
         """Save recorded frames to video file.
 
-        Uses simple frame-by-frame PNG export since OpenCV video
-        encoding may require system dependencies.
+        Uses OpenCV VideoWriter for MP4 encoding. Falls back to
+        individual PNG export if OpenCV is not available.
         """
-        # Save as individual PNG frames
-        frame_dir = Path(self.output_path).parent / "frames"
-        frame_dir.mkdir(parents=True, exist_ok=True)
+        if _HAS_OPENCV and len(self._frames) > 0:
+            # Determine frame size from first frame
+            h, w = self._frames[0].shape[:2]
+            frame_size = (w, h)
 
-        for i, frame in enumerate(self._frames):
-            img = Image.fromarray(frame.astype(np.uint8))
-            img.save(frame_dir / f"frame_{i:04d}.png")
+            output_dir = os.path.dirname(self.output_path)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
 
-        print(f"  Saved {len(self._frames)} frames to {frame_dir}")
-        print(f"  To create video: ffmpeg -r {self.fps} -i "
-              f"'{frame_dir}/frame_%04d.png' -c:v libx264 "
-              f"'{self.output_path}'")
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            video_writer = cv2.VideoWriter(
+                self.output_path, fourcc, self.fps, frame_size
+            )
+
+            for frame in self._frames:
+                # Ensure frame is 3-channel and correct dtype
+                if frame.ndim == 2:
+                    frame = np.stack([frame] * 3, axis=-1)
+                elif frame.shape[2] == 4:
+                    frame = frame[:, :, :3]  # Remove alpha
+
+                frame_uint8 = frame.astype(np.uint8)
+                if frame_uint8.shape[:2] != (h, w):
+                    frame_uint8 = cv2.resize(frame_uint8, (w, h))
+
+                video_writer.write(frame_uint8)
+
+            video_writer.release()
+            print(f"  Video saved to {self.output_path} "
+                  f"({len(self._frames)} frames, {self.fps} fps)")
+        else:
+            # Fallback: save as individual PNG frames
+            frame_dir = Path(self.output_path).parent / "frames"
+            frame_dir.mkdir(parents=True, exist_ok=True)
+
+            for i, frame in enumerate(self._frames):
+                img = Image.fromarray(frame.astype(np.uint8))
+                img.save(frame_dir / f"frame_{i:04d}.png")
+
+            print(f"  Saved {len(self._frames)} frames to {frame_dir}")
+            print(f"  To create video: ffmpeg -r {self.fps} -i "
+                  f"'{frame_dir}/frame_%04d.png' -c:v libx264 "
+                  f"'{self.output_path}'")
 
     def record_episode(self, env, model=None, n_frames: int = 1000) -> Optional[str]:
         """Record a complete episode.

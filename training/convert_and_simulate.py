@@ -23,6 +23,46 @@ from models.ann.ppo_network import DoomNet
 from models.snn.snn_policy import SNNPolicy
 
 
+def _extract_architecture(policy) -> dict:
+    """Extract network architecture from a trained SB3 policy.
+
+    Supports both the new DoomNet-wrapped policy and older SB3 CnnPolicy.
+
+    Args:
+        policy: The SB3 policy network (ann_model.policy)
+
+    Returns:
+        Dict with n_actions, input_channels, hidden_dim
+    """
+    # New DoomNet-wrapped policy: architecture lives in features_extractor
+    if hasattr(policy, "features_extractor") and hasattr(
+        policy.features_extractor, "conv1"
+    ):
+        nn_module = policy.features_extractor
+        return {
+            "n_actions": nn_module.n_actions,
+            "input_channels": nn_module.conv1.weight.shape[1],
+            "hidden_dim": 512,
+        }
+
+    # Legacy SB3 CnnPolicy / ActorCriticCnnPolicy
+    if hasattr(policy, "action_net"):
+        return {
+            "n_actions": policy.action_net.out_features,
+            "input_channels": policy.features[0].in_channels
+            if hasattr(policy, "features")
+            else 3,
+            "hidden_dim": getattr(
+                policy.mlp_extractor, "policy_net", type("O", (), {"out_features": 256})
+            ).out_features,
+        }
+
+    raise ValueError(
+        "Cannot extract architecture from policy. "
+        "Is this a trained DoomNet or SB3 CnnPolicy model?"
+    )
+
+
 def convert(
     ann_checkpoint_path: str,
     snn_save_path: str = "models/snn_converted",
@@ -55,11 +95,11 @@ def convert(
     ann_model = PPO.load(ann_checkpoint_path)
     print(f"  Loaded: {ann_checkpoint_path}")
 
-    # Extract network architecture details
-    ann_net = ann_model.policy
-    n_actions = ann_net.action_net.out_features
-    input_channels = ann_net.features[0].in_channels
-    hidden_dim = ann_net.mlp_extractor.policy_net.out_features
+    # Extract network architecture details (supports DoomNet and SB3 policies)
+    arch = _extract_architecture(ann_model.policy)
+    n_actions = arch["n_actions"]
+    input_channels = arch["input_channels"]
+    hidden_dim = arch["hidden_dim"]
 
     print(f"  Architecture: input_ch={input_channels}, "
           f"actions={n_actions}, hidden={hidden_dim}")
@@ -76,12 +116,23 @@ def convert(
 
     # Step 3: Convert weights
     print("\n[3/4] Converting ANN weights to SNN...")
+
+    # Get the underlying ANN network for weight access
+    if hasattr(ann_model.policy, "features_extractor") and hasattr(
+        ann_model.policy.features_extractor, "conv1"
+    ):
+        # DoomNet-wrapped policy
+        ann_net = ann_model.policy.features_extractor
+    else:
+        # Legacy SB3 CnnPolicy
+        ann_net = ann_model.policy
+
     snn_policy.convert_from_ann(ann_net)
 
     # Verify conversion: check that weights were copied
     with torch.no_grad():
         # Compare conv1 weights
-        ann_conv1 = ann_net.features[0].weight
+        ann_conv1 = ann_net.conv1.weight
         snn_conv1 = snn_policy.network.conv1.weight
         weight_diff = (ann_conv1 - snn_conv1).abs().max().item()
         print(f"  Max weight difference after copy: {weight_diff:.6f}")
@@ -116,7 +167,7 @@ def convert(
     print(f"    Avg Steps:   {results['mean_steps']:.0f}")
     print(f"    Firing Rate: {results['avg_firing_rate']:.3f}")
 
-    print("\n  ✅ Conversion complete!")
+    print("\n  Conversion complete!")
     return results
 
 

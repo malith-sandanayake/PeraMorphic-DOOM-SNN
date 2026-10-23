@@ -114,6 +114,12 @@ Examples:
         action="store_true",
         help="Enable TensorBoard logging",
     )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=None,
+        help="Learning rate for ANN training (default: 3e-4)",
+    )
 
     # Train-SNN specific args
     parser.add_argument(
